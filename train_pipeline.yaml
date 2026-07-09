@@ -1,0 +1,1582 @@
+# PIPELINE DEFINITION
+# Name: fsl-hello-pipeline
+# Description: verify -> train[CustomJob+container] -> gate -> If(register)
+# Inputs:
+#    accuracy_threshold: float [Default: 0.9]
+#    bucket: str
+#    dataset: str [Default: 'omniglot']
+#    embedding_hid: int [Default: 64.0]
+#    experiment_name: str [Default: 'fsl-inner-loop']
+#    explain_episodes: int [Default: 60.0]
+#    image_name: str [Default: 'train']
+#    image_repo: str [Default: 'fsl-images']
+#    k_shot: int [Default: 5.0]
+#    max_std_threshold: float [Default: 0.05]
+#    model_display_name: str [Default: 'fsl-protonet-omniglot']
+#    n_way: int [Default: 5.0]
+#    project: str
+#    query: int [Default: 15.0]
+#    region: str [Default: 'us-central1']
+#    run_type: str [Default: 'inner_loop']
+#    seed: int [Default: 0.0]
+#    serving_container_image_uri: str [Default: 'us-central1-docker.pkg.dev/x/fsl-images/train:candidate']
+#    test_episodes: int [Default: 1000.0]
+#    train_iters: int [Default: 300.0]
+components:
+  comp-condition-2:
+    dag:
+      tasks:
+        promote-image-component:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-promote-image-component
+          inputs:
+            parameters:
+              image_name:
+                componentInputParameter: pipelinechannel--image_name
+              project:
+                componentInputParameter: pipelinechannel--project
+              region:
+                componentInputParameter: pipelinechannel--region
+              repo:
+                componentInputParameter: pipelinechannel--image_repo
+              source_tag:
+                runtimeValue:
+                  constant: candidate
+              target_tag:
+                runtimeValue:
+                  constant: production
+          taskInfo:
+            name: promote-image-component
+        promote-model-component:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-promote-model-component
+          inputs:
+            parameters:
+              model_resource_name:
+                componentInputParameter: pipelinechannel--register-model-component-resource_name
+              project:
+                componentInputParameter: pipelinechannel--project
+              region:
+                componentInputParameter: pipelinechannel--region
+              version_id:
+                componentInputParameter: pipelinechannel--register-model-component-version_id
+          taskInfo:
+            name: promote-model-component
+    inputDefinitions:
+      parameters:
+        pipelinechannel--evaluate-gate-component-passed:
+          parameterType: BOOLEAN
+        pipelinechannel--heavy-eval-container-passed:
+          parameterType: BOOLEAN
+        pipelinechannel--image_name:
+          parameterType: STRING
+        pipelinechannel--image_repo:
+          parameterType: STRING
+        pipelinechannel--project:
+          parameterType: STRING
+        pipelinechannel--region:
+          parameterType: STRING
+        pipelinechannel--register-model-component-resource_name:
+          parameterType: STRING
+        pipelinechannel--register-model-component-version_id:
+          parameterType: STRING
+  comp-condition-3:
+    dag:
+      tasks:
+        condition-2:
+          componentRef:
+            name: comp-condition-2
+          dependentTasks:
+          - heavy-eval-container
+          - register-model-component
+          inputs:
+            parameters:
+              pipelinechannel--evaluate-gate-component-passed:
+                componentInputParameter: pipelinechannel--evaluate-gate-component-passed
+              pipelinechannel--heavy-eval-container-passed:
+                taskOutputParameter:
+                  outputParameterKey: passed
+                  producerTask: heavy-eval-container
+              pipelinechannel--image_name:
+                componentInputParameter: pipelinechannel--image_name
+              pipelinechannel--image_repo:
+                componentInputParameter: pipelinechannel--image_repo
+              pipelinechannel--project:
+                componentInputParameter: pipelinechannel--project
+              pipelinechannel--region:
+                componentInputParameter: pipelinechannel--region
+              pipelinechannel--register-model-component-resource_name:
+                taskOutputParameter:
+                  outputParameterKey: resource_name
+                  producerTask: register-model-component
+              pipelinechannel--register-model-component-version_id:
+                taskOutputParameter:
+                  outputParameterKey: version_id
+                  producerTask: register-model-component
+          taskInfo:
+            name: heavy-passed
+          triggerPolicy:
+            condition: inputs.parameter_values['pipelinechannel--heavy-eval-container-passed']
+              == true
+        explain-container:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-explain-container
+          dependentTasks:
+          - heavy-eval-container
+          - register-model-component
+          inputs:
+            parameters:
+              bucket:
+                componentInputParameter: pipelinechannel--bucket
+              dataset:
+                componentInputParameter: pipelinechannel--dataset
+              model_dir:
+                componentInputParameter: pipelinechannel--train-container-model_dir
+              model_version:
+                taskOutputParameter:
+                  outputParameterKey: version_id
+                  producerTask: register-model-component
+              n_episodes:
+                componentInputParameter: pipelinechannel--explain_episodes
+              project:
+                componentInputParameter: pipelinechannel--project
+              region:
+                componentInputParameter: pipelinechannel--region
+          taskInfo:
+            name: explain-container
+        heavy-eval-container:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-heavy-eval-container
+          dependentTasks:
+          - register-model-component
+          inputs:
+            parameters:
+              accuracy_threshold:
+                componentInputParameter: pipelinechannel--accuracy_threshold
+              bucket:
+                componentInputParameter: pipelinechannel--bucket
+              dataset:
+                componentInputParameter: pipelinechannel--dataset
+              max_std_threshold:
+                componentInputParameter: pipelinechannel--max_std_threshold
+              model_dir:
+                componentInputParameter: pipelinechannel--train-container-model_dir
+              model_version:
+                taskOutputParameter:
+                  outputParameterKey: version_id
+                  producerTask: register-model-component
+              project:
+                componentInputParameter: pipelinechannel--project
+              region:
+                componentInputParameter: pipelinechannel--region
+              test_episodes:
+                componentInputParameter: pipelinechannel--test_episodes
+              train_accuracy_ci95:
+                componentInputParameter: pipelinechannel--train-container-accuracy_ci95
+              train_accuracy_mean:
+                componentInputParameter: pipelinechannel--train-container-accuracy_mean
+          taskInfo:
+            name: heavy-eval-container
+        register-model-component:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-register-model-component
+          inputs:
+            parameters:
+              accuracy_mean:
+                componentInputParameter: pipelinechannel--train-container-accuracy_mean
+              data_sha:
+                componentInputParameter: pipelinechannel--train-container-data_sha
+              model_dir:
+                componentInputParameter: pipelinechannel--train-container-model_dir
+              model_display_name:
+                componentInputParameter: pipelinechannel--model_display_name
+              project:
+                componentInputParameter: pipelinechannel--project
+              region:
+                componentInputParameter: pipelinechannel--region
+              seed:
+                componentInputParameter: pipelinechannel--seed
+              serving_container_image_uri:
+                componentInputParameter: pipelinechannel--serving_container_image_uri
+          taskInfo:
+            name: register-model-component
+    inputDefinitions:
+      parameters:
+        pipelinechannel--accuracy_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--bucket:
+          parameterType: STRING
+        pipelinechannel--dataset:
+          parameterType: STRING
+        pipelinechannel--evaluate-gate-component-passed:
+          parameterType: BOOLEAN
+        pipelinechannel--explain_episodes:
+          parameterType: NUMBER_INTEGER
+        pipelinechannel--image_name:
+          parameterType: STRING
+        pipelinechannel--image_repo:
+          parameterType: STRING
+        pipelinechannel--max_std_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--model_display_name:
+          parameterType: STRING
+        pipelinechannel--project:
+          parameterType: STRING
+        pipelinechannel--region:
+          parameterType: STRING
+        pipelinechannel--seed:
+          parameterType: NUMBER_INTEGER
+        pipelinechannel--serving_container_image_uri:
+          parameterType: STRING
+        pipelinechannel--test_episodes:
+          parameterType: NUMBER_INTEGER
+        pipelinechannel--train-container-accuracy_ci95:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--train-container-accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--train-container-data_sha:
+          parameterType: STRING
+        pipelinechannel--train-container-model_dir:
+          parameterType: STRING
+  comp-condition-4:
+    dag:
+      tasks:
+        explain-container-2:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-explain-container-2
+          inputs:
+            parameters:
+              bucket:
+                componentInputParameter: pipelinechannel--bucket
+              dataset:
+                componentInputParameter: pipelinechannel--dataset
+              model_dir:
+                componentInputParameter: pipelinechannel--train-container-model_dir
+              model_version:
+                runtimeValue:
+                  constant: not-registered
+              n_episodes:
+                componentInputParameter: pipelinechannel--explain_episodes
+              project:
+                componentInputParameter: pipelinechannel--project
+              region:
+                componentInputParameter: pipelinechannel--region
+          taskInfo:
+            name: explain-container-2
+        rejection-report-component:
+          cachingOptions:
+            enableCache: true
+          componentRef:
+            name: comp-rejection-report-component
+          inputs:
+            parameters:
+              accuracy_ci95:
+                componentInputParameter: pipelinechannel--train-container-accuracy_ci95
+              accuracy_mean:
+                componentInputParameter: pipelinechannel--train-container-accuracy_mean
+              accuracy_std:
+                componentInputParameter: pipelinechannel--train-container-accuracy_std
+              accuracy_threshold:
+                componentInputParameter: pipelinechannel--accuracy_threshold
+              gate_reason:
+                componentInputParameter: pipelinechannel--evaluate-gate-component-reason
+              max_std_threshold:
+                componentInputParameter: pipelinechannel--max_std_threshold
+          taskInfo:
+            name: rejection-report-component
+    inputDefinitions:
+      parameters:
+        pipelinechannel--accuracy_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--bucket:
+          parameterType: STRING
+        pipelinechannel--dataset:
+          parameterType: STRING
+        pipelinechannel--evaluate-gate-component-passed:
+          parameterType: BOOLEAN
+        pipelinechannel--evaluate-gate-component-reason:
+          parameterType: STRING
+        pipelinechannel--explain_episodes:
+          parameterType: NUMBER_INTEGER
+        pipelinechannel--max_std_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--project:
+          parameterType: STRING
+        pipelinechannel--region:
+          parameterType: STRING
+        pipelinechannel--train-container-accuracy_ci95:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--train-container-accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--train-container-accuracy_std:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--train-container-model_dir:
+          parameterType: STRING
+  comp-condition-branches-1:
+    dag:
+      tasks:
+        condition-3:
+          componentRef:
+            name: comp-condition-3
+          inputs:
+            parameters:
+              pipelinechannel--accuracy_threshold:
+                componentInputParameter: pipelinechannel--accuracy_threshold
+              pipelinechannel--bucket:
+                componentInputParameter: pipelinechannel--bucket
+              pipelinechannel--dataset:
+                componentInputParameter: pipelinechannel--dataset
+              pipelinechannel--evaluate-gate-component-passed:
+                componentInputParameter: pipelinechannel--evaluate-gate-component-passed
+              pipelinechannel--explain_episodes:
+                componentInputParameter: pipelinechannel--explain_episodes
+              pipelinechannel--image_name:
+                componentInputParameter: pipelinechannel--image_name
+              pipelinechannel--image_repo:
+                componentInputParameter: pipelinechannel--image_repo
+              pipelinechannel--max_std_threshold:
+                componentInputParameter: pipelinechannel--max_std_threshold
+              pipelinechannel--model_display_name:
+                componentInputParameter: pipelinechannel--model_display_name
+              pipelinechannel--project:
+                componentInputParameter: pipelinechannel--project
+              pipelinechannel--region:
+                componentInputParameter: pipelinechannel--region
+              pipelinechannel--seed:
+                componentInputParameter: pipelinechannel--seed
+              pipelinechannel--serving_container_image_uri:
+                componentInputParameter: pipelinechannel--serving_container_image_uri
+              pipelinechannel--test_episodes:
+                componentInputParameter: pipelinechannel--test_episodes
+              pipelinechannel--train-container-accuracy_ci95:
+                componentInputParameter: pipelinechannel--train-container-accuracy_ci95
+              pipelinechannel--train-container-accuracy_mean:
+                componentInputParameter: pipelinechannel--train-container-accuracy_mean
+              pipelinechannel--train-container-data_sha:
+                componentInputParameter: pipelinechannel--train-container-data_sha
+              pipelinechannel--train-container-model_dir:
+                componentInputParameter: pipelinechannel--train-container-model_dir
+          taskInfo:
+            name: gate-passed
+          triggerPolicy:
+            condition: inputs.parameter_values['pipelinechannel--evaluate-gate-component-passed']
+              == true
+        condition-4:
+          componentRef:
+            name: comp-condition-4
+          inputs:
+            parameters:
+              pipelinechannel--accuracy_threshold:
+                componentInputParameter: pipelinechannel--accuracy_threshold
+              pipelinechannel--bucket:
+                componentInputParameter: pipelinechannel--bucket
+              pipelinechannel--dataset:
+                componentInputParameter: pipelinechannel--dataset
+              pipelinechannel--evaluate-gate-component-passed:
+                componentInputParameter: pipelinechannel--evaluate-gate-component-passed
+              pipelinechannel--evaluate-gate-component-reason:
+                componentInputParameter: pipelinechannel--evaluate-gate-component-reason
+              pipelinechannel--explain_episodes:
+                componentInputParameter: pipelinechannel--explain_episodes
+              pipelinechannel--max_std_threshold:
+                componentInputParameter: pipelinechannel--max_std_threshold
+              pipelinechannel--project:
+                componentInputParameter: pipelinechannel--project
+              pipelinechannel--region:
+                componentInputParameter: pipelinechannel--region
+              pipelinechannel--train-container-accuracy_ci95:
+                componentInputParameter: pipelinechannel--train-container-accuracy_ci95
+              pipelinechannel--train-container-accuracy_mean:
+                componentInputParameter: pipelinechannel--train-container-accuracy_mean
+              pipelinechannel--train-container-accuracy_std:
+                componentInputParameter: pipelinechannel--train-container-accuracy_std
+              pipelinechannel--train-container-model_dir:
+                componentInputParameter: pipelinechannel--train-container-model_dir
+          taskInfo:
+            name: gate-failed
+          triggerPolicy:
+            condition: '!(inputs.parameter_values[''pipelinechannel--evaluate-gate-component-passed'']
+              == true)'
+    inputDefinitions:
+      parameters:
+        pipelinechannel--accuracy_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--bucket:
+          parameterType: STRING
+        pipelinechannel--dataset:
+          parameterType: STRING
+        pipelinechannel--evaluate-gate-component-passed:
+          parameterType: BOOLEAN
+        pipelinechannel--evaluate-gate-component-reason:
+          parameterType: STRING
+        pipelinechannel--explain_episodes:
+          parameterType: NUMBER_INTEGER
+        pipelinechannel--image_name:
+          parameterType: STRING
+        pipelinechannel--image_repo:
+          parameterType: STRING
+        pipelinechannel--max_std_threshold:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--model_display_name:
+          parameterType: STRING
+        pipelinechannel--project:
+          parameterType: STRING
+        pipelinechannel--region:
+          parameterType: STRING
+        pipelinechannel--seed:
+          parameterType: NUMBER_INTEGER
+        pipelinechannel--serving_container_image_uri:
+          parameterType: STRING
+        pipelinechannel--test_episodes:
+          parameterType: NUMBER_INTEGER
+        pipelinechannel--train-container-accuracy_ci95:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--train-container-accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--train-container-accuracy_std:
+          parameterType: NUMBER_DOUBLE
+        pipelinechannel--train-container-data_sha:
+          parameterType: STRING
+        pipelinechannel--train-container-model_dir:
+          parameterType: STRING
+  comp-evaluate-gate-component:
+    executorLabel: exec-evaluate-gate-component
+    inputDefinitions:
+      parameters:
+        accuracy_ci95:
+          parameterType: NUMBER_DOUBLE
+        accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+        accuracy_std:
+          parameterType: NUMBER_DOUBLE
+        accuracy_threshold:
+          parameterType: NUMBER_DOUBLE
+        max_std_threshold:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        gate_metrics:
+          artifactType:
+            schemaTitle: system.Metrics
+            schemaVersion: 0.0.1
+      parameters:
+        passed:
+          parameterType: BOOLEAN
+        reason:
+          parameterType: STRING
+  comp-explain-container:
+    executorLabel: exec-explain-container
+    inputDefinitions:
+      parameters:
+        bucket:
+          parameterType: STRING
+        dataset:
+          parameterType: STRING
+        model_dir:
+          parameterType: STRING
+        model_version:
+          parameterType: STRING
+        n_episodes:
+          parameterType: NUMBER_INTEGER
+        project:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+      parameters:
+        summary:
+          parameterType: STRING
+  comp-explain-container-2:
+    executorLabel: exec-explain-container-2
+    inputDefinitions:
+      parameters:
+        bucket:
+          parameterType: STRING
+        dataset:
+          parameterType: STRING
+        model_dir:
+          parameterType: STRING
+        model_version:
+          parameterType: STRING
+        n_episodes:
+          parameterType: NUMBER_INTEGER
+        project:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+      parameters:
+        summary:
+          parameterType: STRING
+  comp-heavy-eval-container:
+    executorLabel: exec-heavy-eval-container
+    inputDefinitions:
+      parameters:
+        accuracy_threshold:
+          parameterType: NUMBER_DOUBLE
+        bucket:
+          parameterType: STRING
+        dataset:
+          parameterType: STRING
+        max_std_threshold:
+          parameterType: NUMBER_DOUBLE
+        model_dir:
+          parameterType: STRING
+        model_version:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+        test_episodes:
+          parameterType: NUMBER_INTEGER
+        train_accuracy_ci95:
+          parameterType: NUMBER_DOUBLE
+        train_accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+      parameters:
+        accuracy_recomputed:
+          parameterType: NUMBER_DOUBLE
+        passed:
+          parameterType: BOOLEAN
+        reason:
+          parameterType: STRING
+  comp-log-experiment-component:
+    executorLabel: exec-log-experiment-component
+    inputDefinitions:
+      parameters:
+        accuracy_ci95:
+          parameterType: NUMBER_DOUBLE
+        accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+        accuracy_std:
+          parameterType: NUMBER_DOUBLE
+        data_sha:
+          parameterType: STRING
+        dataset:
+          parameterType: STRING
+        experiment_name:
+          parameterType: STRING
+        gate_passed:
+          parameterType: BOOLEAN
+        gate_reason:
+          parameterType: STRING
+        k_shot:
+          parameterType: NUMBER_INTEGER
+        n_way:
+          parameterType: NUMBER_INTEGER
+        project:
+          parameterType: STRING
+        query:
+          parameterType: NUMBER_INTEGER
+        region:
+          parameterType: STRING
+        run_type:
+          parameterType: STRING
+        seed:
+          parameterType: NUMBER_INTEGER
+        train_iters:
+          parameterType: NUMBER_INTEGER
+        train_time:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-promote-image-component:
+    executorLabel: exec-promote-image-component
+    inputDefinitions:
+      parameters:
+        image_name:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+        repo:
+          parameterType: STRING
+        source_tag:
+          parameterType: STRING
+        target_tag:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-promote-model-component:
+    executorLabel: exec-promote-model-component
+    inputDefinitions:
+      parameters:
+        model_resource_name:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+        version_id:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-register-model-component:
+    executorLabel: exec-register-model-component
+    inputDefinitions:
+      parameters:
+        accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+        data_sha:
+          parameterType: STRING
+        model_dir:
+          parameterType: STRING
+        model_display_name:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+        region:
+          parameterType: STRING
+        seed:
+          parameterType: NUMBER_INTEGER
+        serving_container_image_uri:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        resource_name:
+          parameterType: STRING
+        version_id:
+          parameterType: STRING
+  comp-rejection-report-component:
+    executorLabel: exec-rejection-report-component
+    inputDefinitions:
+      parameters:
+        accuracy_ci95:
+          parameterType: NUMBER_DOUBLE
+        accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+        accuracy_std:
+          parameterType: NUMBER_DOUBLE
+        accuracy_threshold:
+          parameterType: NUMBER_DOUBLE
+        gate_reason:
+          parameterType: STRING
+        max_std_threshold:
+          parameterType: NUMBER_DOUBLE
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-train-container:
+    executorLabel: exec-train-container
+    inputDefinitions:
+      parameters:
+        base_output_directory:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        bucket:
+          parameterType: STRING
+        dataset:
+          parameterType: STRING
+        display_name:
+          defaultValue: fsl-training-job
+          isOptional: true
+          parameterType: STRING
+        embedding_hid:
+          parameterType: NUMBER_INTEGER
+        enable_web_access:
+          defaultValue: false
+          isOptional: true
+          parameterType: BOOLEAN
+        encryption_spec_key_name:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        k_shot:
+          parameterType: NUMBER_INTEGER
+        labels:
+          isOptional: true
+          parameterType: STRUCT
+        location:
+          defaultValue: '{{$.pipeline_google_cloud_location}}'
+          isOptional: true
+          parameterType: STRING
+        max_wait_duration:
+          defaultValue: 86400s
+          isOptional: true
+          parameterType: STRING
+        n_way:
+          parameterType: NUMBER_INTEGER
+        network:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        persistent_resource_id:
+          defaultValue: '{{$.pipeline_persistent_resource_id}}'
+          isOptional: true
+          parameterType: STRING
+        project:
+          parameterType: STRING
+        psc_interface_config:
+          isOptional: true
+          parameterType: STRUCT
+        query:
+          parameterType: NUMBER_INTEGER
+        reserved_ip_ranges:
+          isOptional: true
+          parameterType: LIST
+        restart_job_on_worker_restart:
+          defaultValue: false
+          isOptional: true
+          parameterType: BOOLEAN
+        seed:
+          parameterType: NUMBER_INTEGER
+        service_account:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        strategy:
+          defaultValue: STANDARD
+          isOptional: true
+          parameterType: STRING
+        tensorboard:
+          defaultValue: ''
+          isOptional: true
+          parameterType: STRING
+        timeout:
+          defaultValue: 604800s
+          isOptional: true
+          parameterType: STRING
+        train_iters:
+          parameterType: NUMBER_INTEGER
+        worker_pool_specs:
+          defaultValue:
+          - container_spec:
+              args:
+              - --project
+              - '{{$.inputs.parameters[''project'']}}'
+              - --bucket
+              - '{{$.inputs.parameters[''bucket'']}}'
+              - --dataset
+              - '{{$.inputs.parameters[''dataset'']}}'
+              - --n-way
+              - '{{$.inputs.parameters[''n_way'']}}'
+              - --k-shot
+              - '{{$.inputs.parameters[''k_shot'']}}'
+              - --query
+              - '{{$.inputs.parameters[''query'']}}'
+              - --seed
+              - '{{$.inputs.parameters[''seed'']}}'
+              - --train-iters
+              - '{{$.inputs.parameters[''train_iters'']}}'
+              - --embedding-hid
+              - '{{$.inputs.parameters[''embedding_hid'']}}'
+              - --accuracy-mean-output-path
+              - '{{$.outputs.parameters[''accuracy_mean''].output_file}}'
+              - --accuracy-ci95-output-path
+              - '{{$.outputs.parameters[''accuracy_ci95''].output_file}}'
+              - --accuracy-std-output-path
+              - '{{$.outputs.parameters[''accuracy_std''].output_file}}'
+              - --train-time-output-path
+              - '{{$.outputs.parameters[''train_time''].output_file}}'
+              - --model-dir-output-path
+              - '{{$.outputs.parameters[''model_dir''].output_file}}'
+              - --data-sha-output-path
+              - '{{$.outputs.parameters[''data_sha''].output_file}}'
+              command:
+              - python
+              - scripts/train_pipeline_entry.py
+              env: []
+              image_uri: us-central1-docker.pkg.dev/dark-data-discovery/fsl-images/train:candidate
+            disk_spec:
+              boot_disk_size_gb: 100.0
+              boot_disk_type: pd-ssd
+            machine_spec:
+              machine_type: n1-standard-4
+            replica_count: 1.0
+          isOptional: true
+          parameterType: LIST
+    outputDefinitions:
+      parameters:
+        accuracy_ci95:
+          parameterType: NUMBER_DOUBLE
+        accuracy_mean:
+          parameterType: NUMBER_DOUBLE
+        accuracy_std:
+          parameterType: NUMBER_DOUBLE
+        data_sha:
+          parameterType: STRING
+        gcp_resources:
+          parameterType: STRING
+        model_dir:
+          parameterType: STRING
+        train_time:
+          parameterType: NUMBER_DOUBLE
+  comp-verify-frozen-component:
+    executorLabel: exec-verify-frozen-component
+    inputDefinitions:
+      parameters:
+        bucket:
+          parameterType: STRING
+        dataset:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-evaluate-gate-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - evaluate_gate_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef evaluate_gate_component(\n    accuracy_mean: float, accuracy_ci95:\
+          \ float, accuracy_std: float,\n    accuracy_threshold: float, max_std_threshold:\
+          \ float,\n    gate_metrics: Output[Metrics],\n) -> NamedTuple(\"G\", [(\"\
+          passed\", bool), (\"reason\", str)]):\n    checks = []\n    lower = accuracy_mean\
+          \ - accuracy_ci95\n    checks.append((\"accuracy_lower_ci\", lower >= accuracy_threshold,\n\
+          \                   f\"lowerCI={lower:.4f} vs threshold={accuracy_threshold:.4f}\"\
+          ))\n    checks.append((\"stability\", accuracy_std <= max_std_threshold,\n\
+          \                   f\"std={accuracy_std:.4f} vs max={max_std_threshold:.4f}\"\
+          ))\n    passed = all(o for _, o, _ in checks)\n    reason = \"; \".join(f\"\
+          {n}: {'PASS' if o else 'FAIL'} ({d})\" for n, o, d in checks)\n    gate_metrics.log_metric(\"\
+          gate_passed\", 1.0 if passed else 0.0)\n    gate_metrics.log_metric(\"accuracy_lower_ci\"\
+          , lower)\n    gate_metrics.log_metric(\"margin_above_threshold\", lower\
+          \ - accuracy_threshold)\n    gate_metrics.log_metric(\"std_headroom\", max_std_threshold\
+          \ - accuracy_std)\n    print(f\"Gate: {'PASSED' if passed else 'FAILED'}\
+          \ - {reason}\")\n    from collections import namedtuple\n    return namedtuple(\"\
+          G\", [\"passed\", \"reason\"])(passed, reason)\n\n"
+        image: python:3.10
+    exec-explain-container:
+      container:
+        args:
+        - --project
+        - '{{$.inputs.parameters[''project'']}}'
+        - --region
+        - '{{$.inputs.parameters[''region'']}}'
+        - --bucket
+        - '{{$.inputs.parameters[''bucket'']}}'
+        - --dataset
+        - '{{$.inputs.parameters[''dataset'']}}'
+        - --model-dir
+        - '{{$.inputs.parameters[''model_dir'']}}'
+        - --model-version
+        - '{{$.inputs.parameters[''model_version'']}}'
+        - --n-episodes
+        - '{{$.inputs.parameters[''n_episodes'']}}'
+        - --report-html-path
+        - '{{$.outputs.artifacts[''report''].path}}'
+        - --summary-output-path
+        - '{{$.outputs.parameters[''summary''].output_file}}'
+        command:
+        - python
+        - scripts/explain_pipeline_entry.py
+        image: us-central1-docker.pkg.dev/dark-data-discovery/fsl-images/train:candidate
+    exec-explain-container-2:
+      container:
+        args:
+        - --project
+        - '{{$.inputs.parameters[''project'']}}'
+        - --region
+        - '{{$.inputs.parameters[''region'']}}'
+        - --bucket
+        - '{{$.inputs.parameters[''bucket'']}}'
+        - --dataset
+        - '{{$.inputs.parameters[''dataset'']}}'
+        - --model-dir
+        - '{{$.inputs.parameters[''model_dir'']}}'
+        - --model-version
+        - '{{$.inputs.parameters[''model_version'']}}'
+        - --n-episodes
+        - '{{$.inputs.parameters[''n_episodes'']}}'
+        - --report-html-path
+        - '{{$.outputs.artifacts[''report''].path}}'
+        - --summary-output-path
+        - '{{$.outputs.parameters[''summary''].output_file}}'
+        command:
+        - python
+        - scripts/explain_pipeline_entry.py
+        image: us-central1-docker.pkg.dev/dark-data-discovery/fsl-images/train:candidate
+    exec-heavy-eval-container:
+      container:
+        args:
+        - --project
+        - '{{$.inputs.parameters[''project'']}}'
+        - --region
+        - '{{$.inputs.parameters[''region'']}}'
+        - --bucket
+        - '{{$.inputs.parameters[''bucket'']}}'
+        - --dataset
+        - '{{$.inputs.parameters[''dataset'']}}'
+        - --model-dir
+        - '{{$.inputs.parameters[''model_dir'']}}'
+        - --model-version
+        - '{{$.inputs.parameters[''model_version'']}}'
+        - --train-accuracy-mean
+        - '{{$.inputs.parameters[''train_accuracy_mean'']}}'
+        - --train-accuracy-ci95
+        - '{{$.inputs.parameters[''train_accuracy_ci95'']}}'
+        - --accuracy-threshold
+        - '{{$.inputs.parameters[''accuracy_threshold'']}}'
+        - --max-std-threshold
+        - '{{$.inputs.parameters[''max_std_threshold'']}}'
+        - --test-episodes
+        - '{{$.inputs.parameters[''test_episodes'']}}'
+        - --passed-output-path
+        - '{{$.outputs.parameters[''passed''].output_file}}'
+        - --reason-output-path
+        - '{{$.outputs.parameters[''reason''].output_file}}'
+        - --accuracy-recomputed-output-path
+        - '{{$.outputs.parameters[''accuracy_recomputed''].output_file}}'
+        - --report-html-path
+        - '{{$.outputs.artifacts[''report''].path}}'
+        command:
+        - python
+        - scripts/evaluate_pipeline_entry.py
+        image: us-central1-docker.pkg.dev/dark-data-discovery/fsl-images/train:candidate
+    exec-log-experiment-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - log_experiment_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef log_experiment_component(\n    project: str, region: str, experiment_name:\
+          \ str, run_type: str, dataset: str,\n    n_way: int, k_shot: int, query:\
+          \ int, seed: int, train_iters: int,\n    data_sha: str, accuracy_mean: float,\
+          \ accuracy_ci95: float,\n    accuracy_std: float, train_time: float, gate_passed:\
+          \ bool, gate_reason: str,\n) -> str:\n    import time\n    from google.cloud\
+          \ import aiplatform\n    aiplatform.init(project=project, location=region,\
+          \ experiment=experiment_name)\n    run_name = f\"pipeline-{run_type.replace('_','-')}-{n_way}w{k_shot}s-seed{seed}-{int(time.time())}\"\
+          \n    aiplatform.start_run(run_name)\n    aiplatform.log_params({\"model\"\
+          : \"protonet\", \"n_way\": n_way, \"k_shot\": k_shot,\n        \"query\"\
+          : query, \"seed\": seed, \"train_iters\": train_iters, \"dataset\": dataset,\n\
+          \        \"dataset_archive_sha256\": data_sha, \"run_type\": run_type,\n\
+          \        \"gate_passed\": gate_passed, \"gate_reason\": gate_reason})\n\
+          \    aiplatform.log_metrics({\"test_accuracy_mean\": accuracy_mean,\n  \
+          \      \"test_accuracy_ci95\": accuracy_ci95, \"test_accuracy_std\": accuracy_std,\n\
+          \        \"train_time_seconds\": train_time})\n    aiplatform.end_run()\n\
+          \    print(f\"Logged run {run_name}\")\n    return run_name\n\n"
+        image: python:3.10
+    exec-promote-image-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - promote_image_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-artifact-registry'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef promote_image_component(\n    project: str, region: str, repo:\
+          \ str, image_name: str,\n    source_tag: str, target_tag: str,\n) -> str:\n\
+          \    # Retag bez pobierania obrazu: tag docelowy wskazuje na TE SAMA wersje\n\
+          \    # (digest), na ktora wskazuje tag zrodlowy. Testowany artefakt == promowany.\n\
+          \    from google.api_core.exceptions import AlreadyExists, NotFound\n  \
+          \  from google.cloud import artifactregistry_v1\n    client = artifactregistry_v1.ArtifactRegistryClient()\n\
+          \    base = f\"projects/{project}/locations/{region}/repositories/{repo}/packages/{image_name}\"\
+          \n    src = client.get_tag(name=f\"{base}/tags/{source_tag}\")\n    print(f\"\
+          Source {source_tag} -> version: {src.version}\")\n    tag_obj = artifactregistry_v1.Tag(name=f\"\
+          {base}/tags/{target_tag}\", version=src.version)\n    try:\n        client.create_tag(parent=base,\
+          \ tag=tag_obj, tag_id=target_tag)\n        print(f\"Created tag {target_tag}\"\
+          )\n    except AlreadyExists:\n        client.update_tag(tag=tag_obj)\n \
+          \       print(f\"Updated tag {target_tag} to {src.version}\")\n    return\
+          \ f\"{image_name}:{target_tag} -> {src.version.split('/')[-1][:24]}\"\n\n"
+        image: python:3.10
+    exec-promote-model-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - promote_model_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef promote_model_component(\n    project: str, region: str, model_resource_name:\
+          \ str, version_id: str,\n) -> str:\n    from google.cloud import aiplatform\n\
+          \    from google.cloud.aiplatform.models import ModelRegistry\n    aiplatform.init(project=project,\
+          \ location=region)\n    registry = ModelRegistry(model=model_resource_name,\
+          \ project=project, location=region)\n    registry.add_version_aliases([\"\
+          production\"], version=version_id)\n    print(f\"Alias 'production' -> version\
+          \ {version_id} of {model_resource_name}\")\n    return f\"{model_resource_name}@{version_id}\"\
+          \n\n"
+        image: python:3.10
+    exec-register-model-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - register_model_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef register_model_component(\n    project: str, region: str, model_display_name:\
+          \ str,\n    serving_container_image_uri: str, model_dir: str,\n    accuracy_mean:\
+          \ float, data_sha: str, seed: int,\n) -> NamedTuple(\"Reg\", [(\"resource_name\"\
+          , str), (\"version_id\", str)]):\n    from google.cloud import aiplatform\n\
+          \    aiplatform.init(project=project, location=region)\n    existing = aiplatform.Model.list(filter=f'display_name=\"\
+          {model_display_name}\"')\n    parent = existing[0].resource_name if existing\
+          \ else None\n    m = aiplatform.Model.upload(\n        display_name=model_display_name,\
+          \ artifact_uri=model_dir,\n        serving_container_image_uri=serving_container_image_uri,\
+          \ parent_model=parent,\n        labels={\"framework\": \"pytorch\", \"model\"\
+          : \"protonet\", \"seed\": str(seed)},\n        description=f\"ProtoNet acc={accuracy_mean:.4f}\
+          \ sha={data_sha[:12]}\",\n    )\n    print(f\"Registered {m.resource_name}\
+          \ v{m.version_id}\")\n    from collections import namedtuple\n    return\
+          \ namedtuple(\"Reg\", [\"resource_name\", \"version_id\"])(m.resource_name,\
+          \ str(m.version_id))\n\n"
+        image: python:3.10
+    exec-rejection-report-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - rejection_report_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef rejection_report_component(\n    accuracy_mean: float, accuracy_ci95:\
+          \ float, accuracy_std: float,\n    accuracy_threshold: float, max_std_threshold:\
+          \ float, gate_reason: str,\n    report: Output[HTML],\n) -> str:\n    def\
+          \ svg_gauge(value, threshold, lo, hi, label, value_label, threshold_label,\n\
+          \                  width=640, height=90, pass_side=\"right\"):\n       \
+          \ pad = 60\n        bar_w = width - 2 * pad\n        y = 42\n\n        def\
+          \ x_px(v):\n            v = max(lo, min(hi, v))\n            return pad\
+          \ + (v - lo) / (hi - lo or 1) * bar_w\n\n        tx, vx = x_px(threshold),\
+          \ x_px(value)\n        if pass_side == \"right\":\n            fail_rect\
+          \ = f'<rect x=\"{pad}\" y=\"{y}\" width=\"{tx-pad:.1f}\" height=\"14\" fill=\"\
+          #f6d5d1\"/>'\n            pass_rect = f'<rect x=\"{tx:.1f}\" y=\"{y}\" width=\"\
+          {pad+bar_w-tx:.1f}\" height=\"14\" fill=\"#d9ead9\"/>'\n        else:\n\
+          \            pass_rect = f'<rect x=\"{pad}\" y=\"{y}\" width=\"{tx-pad:.1f}\"\
+          \ height=\"14\" fill=\"#d9ead9\"/>'\n            fail_rect = f'<rect x=\"\
+          {tx:.1f}\" y=\"{y}\" width=\"{pad+bar_w-tx:.1f}\" height=\"14\" fill=\"\
+          #f6d5d1\"/>'\n        ok = (value >= threshold) if pass_side == \"right\"\
+          \ else (value <= threshold)\n        col = \"#2a7d4f\" if ok else \"#c0392b\"\
+          \n        return (f'<svg viewBox=\"0 0 {width} {height}\" xmlns=\"http://www.w3.org/2000/svg\"\
+          >'\n                f'<text x=\"{pad}\" y=\"20\" font-size=\"13\" fill=\"\
+          #333\" font-weight=\"600\">{label}</text>'\n                f'{fail_rect}{pass_rect}'\n\
+          \                f'<line x1=\"{tx:.1f}\" y1=\"{y-6}\" x2=\"{tx:.1f}\" y2=\"\
+          {y+20}\" stroke=\"#c0392b\" stroke-width=\"2\"/>'\n                f'<text\
+          \ x=\"{tx:.1f}\" y=\"{y+34}\" font-size=\"11\" fill=\"#c0392b\" text-anchor=\"\
+          middle\">{threshold_label}</text>'\n                f'<circle cx=\"{vx:.1f}\"\
+          \ cy=\"{y+7}\" r=\"7\" fill=\"{col}\"/>'\n                f'<text x=\"{vx:.1f}\"\
+          \ y=\"{y-10}\" font-size=\"11\" fill=\"{col}\" text-anchor=\"middle\" font-weight=\"\
+          600\">{value_label}</text>'\n                f'</svg>')\n\n    lower = accuracy_mean\
+          \ - accuracy_ci95\n    g1 = svg_gauge(lower, accuracy_threshold, min(0.5,\
+          \ lower - 0.05), 1.0,\n                   \"Criterion 1: lower 95% CI bound\
+          \ (must be RIGHT of the threshold)\",\n                   f\"{lower:.3f}\"\
+          , f\"threshold {accuracy_threshold}\", pass_side=\"right\")\n    g2 = svg_gauge(accuracy_std,\
+          \ max_std_threshold, 0.0, max(0.15, accuracy_std * 1.5),\n             \
+          \      \"Criterion 2: std / spread (must be LEFT of the max)\",\n      \
+          \             f\"{accuracy_std:.3f}\", f\"max {max_std_threshold}\", pass_side=\"\
+          left\")\n    html = f\"\"\"<!DOCTYPE html><html><head><style>\nbody{{font-family:-apple-system,sans-serif;margin:24px;color:#1a1a1a;max-width:760px}}\n\
+          .verdict{{font-size:18px;font-weight:700;color:#c0392b;margin:10px 0}}\n\
+          .metric{{display:inline-block;margin:8px 28px 8px 0}}.metric .v{{font-size:24px;font-weight:600;color:#4C72B0}}\n\
+          .metric .l{{font-size:12px;color:#666}}.reason{{font-size:13px;color:#555;background:#f7f7f7;padding:10px;border-radius:6px}}\n\
+          .meta{{font-size:12px;color:#888}}</style></head><body>\n<h2>Gate Rejection\
+          \ Report</h2>\n<div class=\"verdict\">MODEL REJECTED - not registered, not\
+          \ promoted</div>\n<div class=\"metric\"><div class=\"v\">{accuracy_mean:.2%}</div><div\
+          \ class=\"l\">mean accuracy</div></div>\n<div class=\"metric\"><div class=\"\
+          v\">{lower:.4f}</div><div class=\"l\">lower 95% CI</div></div>\n<div class=\"\
+          metric\"><div class=\"v\">{accuracy_std:.4f}</div><div class=\"l\">std (spread)</div></div>\n\
+          {g1}{g2}\n<p class=\"reason\">{gate_reason}</p>\n<p class=\"meta\">A dot\
+          \ in the red zone is the reason for rejection. The mean alone can look fine\
+          \ while\nthe lower-CI bound (confidence, penalized by spread) or the spread\
+          \ itself fails - see the two gauges.</p>\n</body></html>\"\"\"\n    with\
+          \ open(report.path, \"w\") as f:\n        f.write(html)\n    print(f\"Rejection\
+          \ report written. Reason: {gate_reason}\")\n    return \"rejected-report-written\"\
+          \n\n"
+        image: python:3.10
+    exec-train-container:
+      container:
+        args:
+        - --type
+        - CustomJob
+        - --payload
+        - '{"display_name": "{{$.inputs.parameters[''display_name'']}}", "job_spec":
+          {"worker_pool_specs": {{$.inputs.parameters[''worker_pool_specs'']}}, "scheduling":
+          {"timeout": "{{$.inputs.parameters[''timeout'']}}", "restart_job_on_worker_restart":
+          {{$.inputs.parameters[''restart_job_on_worker_restart'']}}, "strategy":
+          "{{$.inputs.parameters[''strategy'']}}", "max_wait_duration": "{{$.inputs.parameters[''max_wait_duration'']}}"},
+          "service_account": "{{$.inputs.parameters[''service_account'']}}", "tensorboard":
+          "{{$.inputs.parameters[''tensorboard'']}}", "enable_web_access": {{$.inputs.parameters[''enable_web_access'']}},
+          "network": "{{$.inputs.parameters[''network'']}}", "reserved_ip_ranges":
+          {{$.inputs.parameters[''reserved_ip_ranges'']}}, "base_output_directory":
+          {"output_uri_prefix": "{{$.inputs.parameters[''base_output_directory'']}}"},
+          "persistent_resource_id": "{{$.inputs.parameters[''persistent_resource_id'']}}",
+          "psc_interface_config": {{$.inputs.parameters[''psc_interface_config'']}}},
+          "labels": {{$.inputs.parameters[''labels'']}}, "encryption_spec": {"kms_key_name":
+          "{{$.inputs.parameters[''encryption_spec_key_name'']}}"}}'
+        - --project
+        - '{{$.inputs.parameters[''project'']}}'
+        - --location
+        - '{{$.inputs.parameters[''location'']}}'
+        - --gcp_resources
+        - '{{$.outputs.parameters[''gcp_resources''].output_file}}'
+        command:
+        - python3
+        - -u
+        - -m
+        - google_cloud_pipeline_components.container.v1.custom_job.launcher
+        image: gcr.io/ml-pipeline/google-cloud-pipeline-components:2.22.0
+    exec-verify-frozen-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - verify_frozen_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef verify_frozen_component(project: str, bucket: str, dataset: str)\
+          \ -> str:\n    from google.cloud import storage\n    import json as _json\n\
+          \    c = storage.Client(project=project)\n    m = _json.loads(c.bucket(bucket).blob(f\"\
+          raw/{dataset}/MANIFEST.json\").download_as_bytes().decode(\"utf-8\"))\n\
+          \    return f\"VERIFIED sha={m['archive_sha256'][:12]}\"\n\n"
+        image: python:3.10
+pipelineInfo:
+  description: verify -> train[CustomJob+container] -> gate -> If(register)
+  name: fsl-hello-pipeline
+root:
+  dag:
+    tasks:
+      condition-branches-1:
+        componentRef:
+          name: comp-condition-branches-1
+        dependentTasks:
+        - evaluate-gate-component
+        - train-container
+        inputs:
+          parameters:
+            pipelinechannel--accuracy_threshold:
+              componentInputParameter: accuracy_threshold
+            pipelinechannel--bucket:
+              componentInputParameter: bucket
+            pipelinechannel--dataset:
+              componentInputParameter: dataset
+            pipelinechannel--evaluate-gate-component-passed:
+              taskOutputParameter:
+                outputParameterKey: passed
+                producerTask: evaluate-gate-component
+            pipelinechannel--evaluate-gate-component-reason:
+              taskOutputParameter:
+                outputParameterKey: reason
+                producerTask: evaluate-gate-component
+            pipelinechannel--explain_episodes:
+              componentInputParameter: explain_episodes
+            pipelinechannel--image_name:
+              componentInputParameter: image_name
+            pipelinechannel--image_repo:
+              componentInputParameter: image_repo
+            pipelinechannel--max_std_threshold:
+              componentInputParameter: max_std_threshold
+            pipelinechannel--model_display_name:
+              componentInputParameter: model_display_name
+            pipelinechannel--project:
+              componentInputParameter: project
+            pipelinechannel--region:
+              componentInputParameter: region
+            pipelinechannel--seed:
+              componentInputParameter: seed
+            pipelinechannel--serving_container_image_uri:
+              componentInputParameter: serving_container_image_uri
+            pipelinechannel--test_episodes:
+              componentInputParameter: test_episodes
+            pipelinechannel--train-container-accuracy_ci95:
+              taskOutputParameter:
+                outputParameterKey: accuracy_ci95
+                producerTask: train-container
+            pipelinechannel--train-container-accuracy_mean:
+              taskOutputParameter:
+                outputParameterKey: accuracy_mean
+                producerTask: train-container
+            pipelinechannel--train-container-accuracy_std:
+              taskOutputParameter:
+                outputParameterKey: accuracy_std
+                producerTask: train-container
+            pipelinechannel--train-container-data_sha:
+              taskOutputParameter:
+                outputParameterKey: data_sha
+                producerTask: train-container
+            pipelinechannel--train-container-model_dir:
+              taskOutputParameter:
+                outputParameterKey: model_dir
+                producerTask: train-container
+        taskInfo:
+          name: condition-branches-1
+      evaluate-gate-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-evaluate-gate-component
+        dependentTasks:
+        - train-container
+        inputs:
+          parameters:
+            accuracy_ci95:
+              taskOutputParameter:
+                outputParameterKey: accuracy_ci95
+                producerTask: train-container
+            accuracy_mean:
+              taskOutputParameter:
+                outputParameterKey: accuracy_mean
+                producerTask: train-container
+            accuracy_std:
+              taskOutputParameter:
+                outputParameterKey: accuracy_std
+                producerTask: train-container
+            accuracy_threshold:
+              componentInputParameter: accuracy_threshold
+            max_std_threshold:
+              componentInputParameter: max_std_threshold
+        taskInfo:
+          name: evaluate-gate-component
+      log-experiment-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-log-experiment-component
+        dependentTasks:
+        - evaluate-gate-component
+        - train-container
+        inputs:
+          parameters:
+            accuracy_ci95:
+              taskOutputParameter:
+                outputParameterKey: accuracy_ci95
+                producerTask: train-container
+            accuracy_mean:
+              taskOutputParameter:
+                outputParameterKey: accuracy_mean
+                producerTask: train-container
+            accuracy_std:
+              taskOutputParameter:
+                outputParameterKey: accuracy_std
+                producerTask: train-container
+            data_sha:
+              taskOutputParameter:
+                outputParameterKey: data_sha
+                producerTask: train-container
+            dataset:
+              componentInputParameter: dataset
+            experiment_name:
+              componentInputParameter: experiment_name
+            gate_passed:
+              taskOutputParameter:
+                outputParameterKey: passed
+                producerTask: evaluate-gate-component
+            gate_reason:
+              taskOutputParameter:
+                outputParameterKey: reason
+                producerTask: evaluate-gate-component
+            k_shot:
+              componentInputParameter: k_shot
+            n_way:
+              componentInputParameter: n_way
+            project:
+              componentInputParameter: project
+            query:
+              componentInputParameter: query
+            region:
+              componentInputParameter: region
+            run_type:
+              componentInputParameter: run_type
+            seed:
+              componentInputParameter: seed
+            train_iters:
+              componentInputParameter: train_iters
+            train_time:
+              taskOutputParameter:
+                outputParameterKey: train_time
+                producerTask: train-container
+        taskInfo:
+          name: log-experiment-component
+      train-container:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-container
+        dependentTasks:
+        - verify-frozen-component
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: bucket
+            dataset:
+              componentInputParameter: dataset
+            embedding_hid:
+              componentInputParameter: embedding_hid
+            k_shot:
+              componentInputParameter: k_shot
+            location:
+              componentInputParameter: region
+            n_way:
+              componentInputParameter: n_way
+            project:
+              componentInputParameter: project
+            query:
+              componentInputParameter: query
+            seed:
+              componentInputParameter: seed
+            train_iters:
+              componentInputParameter: train_iters
+        taskInfo:
+          name: train-container
+      verify-frozen-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-verify-frozen-component
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: bucket
+            dataset:
+              componentInputParameter: dataset
+            project:
+              componentInputParameter: project
+        taskInfo:
+          name: verify-frozen-component
+  inputDefinitions:
+    parameters:
+      accuracy_threshold:
+        defaultValue: 0.9
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      bucket:
+        parameterType: STRING
+      dataset:
+        defaultValue: omniglot
+        isOptional: true
+        parameterType: STRING
+      embedding_hid:
+        defaultValue: 64.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      experiment_name:
+        defaultValue: fsl-inner-loop
+        isOptional: true
+        parameterType: STRING
+      explain_episodes:
+        defaultValue: 60.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      image_name:
+        defaultValue: train
+        isOptional: true
+        parameterType: STRING
+      image_repo:
+        defaultValue: fsl-images
+        isOptional: true
+        parameterType: STRING
+      k_shot:
+        defaultValue: 5.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      max_std_threshold:
+        defaultValue: 0.05
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
+      model_display_name:
+        defaultValue: fsl-protonet-omniglot
+        isOptional: true
+        parameterType: STRING
+      n_way:
+        defaultValue: 5.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      project:
+        parameterType: STRING
+      query:
+        defaultValue: 15.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      region:
+        defaultValue: us-central1
+        isOptional: true
+        parameterType: STRING
+      run_type:
+        defaultValue: inner_loop
+        isOptional: true
+        parameterType: STRING
+      seed:
+        defaultValue: 0.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      serving_container_image_uri:
+        defaultValue: us-central1-docker.pkg.dev/x/fsl-images/train:candidate
+        isOptional: true
+        parameterType: STRING
+      test_episodes:
+        defaultValue: 1000.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      train_iters:
+        defaultValue: 300.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.16.1

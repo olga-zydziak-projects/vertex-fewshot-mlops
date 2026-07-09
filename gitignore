@@ -1,0 +1,48 @@
+# ============ Python ============
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# ============ Środowiska ============
+.venv/
+venv/
+env/
+.python-version
+
+# ============ Jupyter ============
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# ============ Dane i modele (żyją w GCS, nie w repo) ============
+data_cache/
+*.pt
+*.pth
+*.ckpt
+*.npz
+
+# ============ Artefakty pipeline (generowane, wersjonowane w Artifact Registry) ============
+*.yaml.bak
+train_pipeline.yaml
+pipeline-*.yaml
+
+# ============ Sekrety i poświadczenia (NIGDY do repo) ============
+*.json.key
+service-account*.json
+credentials*.json
+.env
+.env.*
+*.pem
+
+# ============ IDE / system ============
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ============ GCP / narzędzia lokalne ============
+.gcloudignore
+.terraform/

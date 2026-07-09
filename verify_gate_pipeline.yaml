@@ -1,0 +1,192 @@
+# PIPELINE DEFINITION
+# Name: fsl-hello-pipeline
+# Description: Verify-gated pipeline: data integrity check before the next step.
+# Inputs:
+#    bucket: str
+#    dataset: str [Default: 'omniglot']
+#    name: str [Default: 'FSL']
+#    project: str
+components:
+  comp-say-hello:
+    executorLabel: exec-say-hello
+    inputDefinitions:
+      parameters:
+        name:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+  comp-verify-frozen-component:
+    executorLabel: exec-verify-frozen-component
+    inputDefinitions:
+      parameters:
+        bucket:
+          parameterType: STRING
+        dataset:
+          parameterType: STRING
+        full_check:
+          defaultValue: true
+          isOptional: true
+          parameterType: BOOLEAN
+        project:
+          parameterType: STRING
+    outputDefinitions:
+      parameters:
+        Output:
+          parameterType: STRING
+deploymentSpec:
+  executors:
+    exec-say-hello:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - say_hello
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef say_hello(name: str) -> str:\n    message = f\"Hello, {name}!\
+          \ I only ran because verification passed.\"\n    print(message)\n    return\
+          \ message\n\n"
+        image: python:3.10
+    exec-verify-frozen-component:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - verify_frozen_component
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-storage'\
+          \  &&  python3 -m pip install --quiet --no-warn-script-location 'kfp==2.16.1'\
+          \ '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"3.9\"' && \"\
+          $0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef verify_frozen_component(\n    project: str,\n    bucket: str,\n\
+          \    dataset: str,\n    full_check: bool = True,\n) -> str:\n    # Verify\
+          \ a GCS-frozen dataset against its manifest. Raises on mismatch,\n    #\
+          \ which fails this pipeline node and blocks everything downstream.\n   \
+          \ import gzip\n    import hashlib\n    import json\n    import tarfile\n\
+          \    import tempfile\n    from pathlib import Path\n\n    from google.cloud\
+          \ import storage\n\n    def sha256_bytes(data: bytes) -> str:\n        return\
+          \ hashlib.sha256(data).hexdigest()\n\n    def sha256_file(path: Path, chunk:\
+          \ int = 1 << 20) -> str:\n        h = hashlib.sha256()\n        with path.open(\"\
+          rb\") as f:\n            for block in iter(lambda: f.read(chunk), b\"\"\
+          ):\n                h.update(block)\n        return h.hexdigest()\n\n  \
+          \  client = storage.Client(project=project)\n    gcs_bucket = client.bucket(bucket)\n\
+          \    prefix = f\"raw/{dataset}\"\n    archive_blob = f\"{prefix}/{dataset}.tar.gz\"\
+          \n    manifest_blob = f\"{prefix}/MANIFEST.json\"\n\n    print(f\"Reading\
+          \ manifest: gs://{bucket}/{manifest_blob}\")\n    manifest = json.loads(gcs_bucket.blob(manifest_blob).download_as_bytes().decode(\"\
+          utf-8\"))\n    expected_archive_sha = manifest[\"archive_sha256\"]\n   \
+          \ expected_files = manifest.get(\"files_sha256\", {})\n\n    with tempfile.TemporaryDirectory()\
+          \ as tmp:\n        archive_local = Path(tmp) / f\"{dataset}.tar.gz\"\n \
+          \       print(f\"Downloading archive: gs://{bucket}/{archive_blob}\")\n\
+          \        archive_local.write_bytes(gcs_bucket.blob(archive_blob).download_as_bytes())\n\
+          \n        actual_sha = sha256_file(archive_local)\n        if actual_sha\
+          \ != expected_archive_sha:\n            raise RuntimeError(\n          \
+          \      f\"Archive SHA256 mismatch: expected {expected_archive_sha}, \"\n\
+          \                f\"got {actual_sha}. Data is NOT intact \u2014 pipeline\
+          \ halted.\"\n            )\n        print(f\"Archive SHA256 OK: {actual_sha}\"\
+          )\n\n        if full_check and expected_files:\n            problems = []\n\
+          \            seen = set()\n            with open(archive_local, \"rb\")\
+          \ as raw:\n                with gzip.GzipFile(fileobj=raw) as gz:\n    \
+          \                with tarfile.open(fileobj=gz) as tar:\n               \
+          \         for member in tar:\n                            if not member.isfile():\n\
+          \                                continue\n                            seen.add(member.name)\n\
+          \                            fobj = tar.extractfile(member)\n          \
+          \                  digest = sha256_bytes(fobj.read())\n                \
+          \            exp = expected_files.get(member.name)\n                   \
+          \         if exp is None:\n                                problems.append(f\"\
+          not in manifest: {member.name}\")\n                            elif exp\
+          \ != digest:\n                                problems.append(f\"checksum\
+          \ mismatch: {member.name}\")\n            for name in expected_files:\n\
+          \                if name not in seen:\n                    problems.append(f\"\
+          missing from archive: {name}\")\n            if problems:\n            \
+          \    raise RuntimeError(\n                    f\"{len(problems)} file-level\
+          \ problem(s): {problems[:5]} \"\n                    f\"\u2014 pipeline\
+          \ halted.\"\n                )\n            print(f\"All {len(seen)} files\
+          \ match the manifest.\")\n\n    result = f\"VERIFIED: {dataset} intact (sha256={actual_sha[:12]}...)\"\
+          \n    print(result)\n    return result\n\n"
+        image: python:3.10
+pipelineInfo:
+  description: 'Verify-gated pipeline: data integrity check before the next step.'
+  name: fsl-hello-pipeline
+root:
+  dag:
+    tasks:
+      say-hello:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-say-hello
+        dependentTasks:
+        - verify-frozen-component
+        inputs:
+          parameters:
+            name:
+              componentInputParameter: name
+        taskInfo:
+          name: say-hello
+      verify-frozen-component:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-verify-frozen-component
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: bucket
+            dataset:
+              componentInputParameter: dataset
+            project:
+              componentInputParameter: project
+        taskInfo:
+          name: verify-frozen-component
+  inputDefinitions:
+    parameters:
+      bucket:
+        parameterType: STRING
+      dataset:
+        defaultValue: omniglot
+        isOptional: true
+        parameterType: STRING
+      name:
+        defaultValue: FSL
+        isOptional: true
+        parameterType: STRING
+      project:
+        parameterType: STRING
+schemaVersion: 2.1.0
+sdkVersion: kfp-2.16.1

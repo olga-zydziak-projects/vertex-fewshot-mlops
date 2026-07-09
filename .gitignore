@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Data lives in GCS (source of truth) — never in git
+/tmp/fsl-*
+scratch/
+data/
+*.tar.gz
+*.pkl
+
+# Notebooks
+.ipynb_checkpoints/
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Credentials — never commit secrets
+service-account*.json
+*.key
+.env

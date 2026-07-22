@@ -49,6 +49,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--train-iters", type=int, default=300)
     ap.add_argument("--embedding-hid", type=int, default=64)
+    ap.add_argument("--lr", type=float, default=1e-3)
     # in-pipeline runs don't log to Experiments from here (a dedicated log
     # component does that downstream); keep training pure.
     ap.add_argument("--no-vertex", action="store_true", default=True)
@@ -66,6 +67,7 @@ def main() -> None:
     from google.cloud import storage
 
     from fsl.config import TrainConfig
+    from fsl.errors import explain_failure
     from fsl.data.omniglot import load_frozen_omniglot
     from fsl.training.loop import train
 
@@ -74,7 +76,7 @@ def main() -> None:
     cfg = TrainConfig(
         project=args.project, region=args.region, bucket=bucket, dataset=args.dataset,
         n_way=args.n_way, k_shot=args.k_shot, query=args.query, seed=args.seed,
-        train_iters=args.train_iters, embedding_hid=args.embedding_hid,
+        train_iters=args.train_iters, embedding_hid=args.embedding_hid, lr=args.lr,
         log_to_vertex=False,   # pipeline logs via a separate component, not here
     )
 
@@ -87,9 +89,10 @@ def main() -> None:
     # dict - so we re-read just the manifest (cheap) to get it.
     client = storage.Client(project=args.project)
     gcs = client.bucket(bucket)
-    manifest = json.loads(
-        gcs.blob(f"raw/{args.dataset}/MANIFEST.json").download_as_bytes().decode("utf-8")
-    )
+    with explain_failure("reading dataset manifest from GCS", bucket=bucket):
+        manifest = json.loads(
+            gcs.blob(f"raw/{args.dataset}/MANIFEST.json").download_as_bytes().decode("utf-8")
+        )
     archive_sha = manifest["archive_sha256"]
 
     import tempfile
@@ -105,8 +108,9 @@ def main() -> None:
         "seed": cfg.seed,       # so evaluation can reconstruct the same class split
     }))
     model_prefix = f"models/{args.dataset}/protonet-seed{cfg.seed}-{int(time.time())}"
-    for fpath in local_model.iterdir():
-        gcs.blob(f"{model_prefix}/{fpath.name}").upload_from_filename(str(fpath))
+    with explain_failure("saving model to GCS", bucket=bucket):
+        for fpath in local_model.iterdir():
+            gcs.blob(f"{model_prefix}/{fpath.name}").upload_from_filename(str(fpath))
     model_gcs_dir = f"gs://{bucket}/{model_prefix}"
     print(f"Model saved to {model_gcs_dir}")
 

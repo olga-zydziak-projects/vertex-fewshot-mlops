@@ -6,11 +6,20 @@
 #    bucket: str
 #    dataset: str [Default: 'omniglot']
 #    embedding_hid: int [Default: 64.0]
+#    enable_hpo: bool [Default: False]
 #    experiment_name: str [Default: 'fsl-inner-loop']
 #    explain_episodes: int [Default: 60.0]
+#    hpo_accelerator_count: int [Default: 0.0]
+#    hpo_accelerator_type: str [Default: '']
+#    hpo_machine_type: str [Default: 'n1-standard-8']
+#    hpo_max_trials: int [Default: 12.0]
+#    hpo_parallel: int [Default: 3.0]
+#    hpo_params_source: str [Default: 'auto']
+#    hpo_val_episodes: int [Default: 400.0]
 #    image_name: str [Default: 'train']
 #    image_repo: str [Default: 'fsl-images']
 #    k_shot: int [Default: 5.0]
+#    lr: float [Default: 0.001]
 #    max_std_threshold: float [Default: 0.05]
 #    model_display_name: str [Default: 'fsl-protonet-omniglot']
 #    n_way: int [Default: 5.0]
@@ -22,6 +31,7 @@
 #    serving_container_image_uri: str [Default: 'us-central1-docker.pkg.dev/x/fsl-images/train:candidate']
 #    test_episodes: int [Default: 1000.0]
 #    train_iters: int [Default: 300.0]
+#    training_image: str [Default: '']
 components:
   comp-condition-2:
     dag:
@@ -589,8 +599,12 @@ components:
           parameterType: BOOLEAN
         gate_reason:
           parameterType: STRING
+        hp_source:
+          parameterType: STRING
         k_shot:
           parameterType: NUMBER_INTEGER
+        lr:
+          parameterType: NUMBER_DOUBLE
         n_way:
           parameterType: NUMBER_INTEGER
         project:
@@ -698,6 +712,65 @@ components:
       parameters:
         Output:
           parameterType: STRING
+  comp-resolve-hyperparameters:
+    executorLabel: exec-resolve-hyperparameters
+    inputDefinitions:
+      parameters:
+        bucket:
+          parameterType: STRING
+        dataset:
+          parameterType: STRING
+        default_embedding_hid:
+          parameterType: NUMBER_INTEGER
+        default_lr:
+          parameterType: NUMBER_DOUBLE
+        default_train_iters:
+          parameterType: NUMBER_INTEGER
+        enable_hpo:
+          parameterType: BOOLEAN
+        hpo_accelerator_count:
+          parameterType: NUMBER_INTEGER
+        hpo_accelerator_type:
+          parameterType: STRING
+        hpo_machine_type:
+          parameterType: STRING
+        hpo_max_trials:
+          parameterType: NUMBER_INTEGER
+        hpo_parallel:
+          parameterType: NUMBER_INTEGER
+        hpo_val_episodes:
+          parameterType: NUMBER_INTEGER
+        k_shot:
+          parameterType: NUMBER_INTEGER
+        n_way:
+          parameterType: NUMBER_INTEGER
+        params_source:
+          parameterType: STRING
+        project:
+          parameterType: STRING
+        query:
+          parameterType: NUMBER_INTEGER
+        region:
+          parameterType: STRING
+        seed:
+          parameterType: NUMBER_INTEGER
+        training_image:
+          parameterType: STRING
+    outputDefinitions:
+      artifacts:
+        report:
+          artifactType:
+            schemaTitle: system.HTML
+            schemaVersion: 0.0.1
+      parameters:
+        embedding_hid:
+          parameterType: NUMBER_INTEGER
+        lr:
+          parameterType: NUMBER_DOUBLE
+        source:
+          parameterType: STRING
+        train_iters:
+          parameterType: NUMBER_INTEGER
   comp-train-container:
     executorLabel: exec-train-container
     inputDefinitions:
@@ -733,6 +806,8 @@ components:
           defaultValue: '{{$.pipeline_google_cloud_location}}'
           isOptional: true
           parameterType: STRING
+        lr:
+          parameterType: NUMBER_DOUBLE
         max_wait_duration:
           defaultValue: 86400s
           isOptional: true
@@ -803,6 +878,8 @@ components:
               - '{{$.inputs.parameters[''train_iters'']}}'
               - --embedding-hid
               - '{{$.inputs.parameters[''embedding_hid'']}}'
+              - --lr
+              - '{{$.inputs.parameters[''lr'']}}'
               - --accuracy-mean-output-path
               - '{{$.outputs.parameters[''accuracy_mean''].output_file}}'
               - --accuracy-ci95-output-path
@@ -1019,19 +1096,19 @@ deploymentSpec:
         - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
           \ *\n\ndef log_experiment_component(\n    project: str, region: str, experiment_name:\
           \ str, run_type: str, dataset: str,\n    n_way: int, k_shot: int, query:\
-          \ int, seed: int, train_iters: int,\n    data_sha: str, accuracy_mean: float,\
-          \ accuracy_ci95: float,\n    accuracy_std: float, train_time: float, gate_passed:\
-          \ bool, gate_reason: str,\n) -> str:\n    import time\n    from google.cloud\
-          \ import aiplatform\n    aiplatform.init(project=project, location=region,\
-          \ experiment=experiment_name)\n    run_name = f\"pipeline-{run_type.replace('_','-')}-{n_way}w{k_shot}s-seed{seed}-{int(time.time())}\"\
+          \ int, seed: int, train_iters: int,\n    lr: float, hp_source: str,\n  \
+          \  data_sha: str, accuracy_mean: float, accuracy_ci95: float,\n    accuracy_std:\
+          \ float, train_time: float, gate_passed: bool, gate_reason: str,\n) -> str:\n\
+          \    import time\n    from google.cloud import aiplatform\n    aiplatform.init(project=project,\
+          \ location=region, experiment=experiment_name)\n    run_name = f\"pipeline-{run_type.replace('_','-')}-{n_way}w{k_shot}s-seed{seed}-{int(time.time())}\"\
           \n    aiplatform.start_run(run_name)\n    aiplatform.log_params({\"model\"\
           : \"protonet\", \"n_way\": n_way, \"k_shot\": k_shot,\n        \"query\"\
           : query, \"seed\": seed, \"train_iters\": train_iters, \"dataset\": dataset,\n\
-          \        \"dataset_archive_sha256\": data_sha, \"run_type\": run_type,\n\
-          \        \"gate_passed\": gate_passed, \"gate_reason\": gate_reason})\n\
-          \    aiplatform.log_metrics({\"test_accuracy_mean\": accuracy_mean,\n  \
-          \      \"test_accuracy_ci95\": accuracy_ci95, \"test_accuracy_std\": accuracy_std,\n\
-          \        \"train_time_seconds\": train_time})\n    aiplatform.end_run()\n\
+          \        \"lr\": lr, \"hyperparameter_source\": hp_source,\n        \"dataset_archive_sha256\"\
+          : data_sha, \"run_type\": run_type,\n        \"gate_passed\": gate_passed,\
+          \ \"gate_reason\": gate_reason})\n    aiplatform.log_metrics({\"test_accuracy_mean\"\
+          : accuracy_mean,\n        \"test_accuracy_ci95\": accuracy_ci95, \"test_accuracy_std\"\
+          : accuracy_std,\n        \"train_time_seconds\": train_time})\n    aiplatform.end_run()\n\
           \    print(f\"Logged run {run_name}\")\n    return run_name\n\n"
         image: python:3.10
     exec-promote-image-component:
@@ -1232,6 +1309,147 @@ deploymentSpec:
           \ report written. Reason: {gate_reason}\")\n    return \"rejected-report-written\"\
           \n\n"
         image: python:3.10
+    exec-resolve-hyperparameters:
+      container:
+        args:
+        - --executor_input
+        - '{{$}}'
+        - --function_to_execute
+        - resolve_hyperparameters
+        command:
+        - sh
+        - -c
+        - "\nif ! [ -x \"$(command -v pip)\" ]; then\n    python3 -m ensurepip ||\
+          \ python3 -m ensurepip --user || apt-get install python3-pip\nfi\n\nPIP_DISABLE_PIP_VERSION_CHECK=1\
+          \ python3 -m pip install --quiet --no-warn-script-location 'google-cloud-aiplatform'\
+          \ 'google-cloud-storage'  &&  python3 -m pip install --quiet --no-warn-script-location\
+          \ 'kfp==2.16.1' '--no-deps' 'typing-extensions>=3.7.4,<5; python_version<\"\
+          3.9\"' && \"$0\" \"$@\"\n"
+        - sh
+        - -ec
+        - 'program_path=$(mktemp -d)
+
+
+          printf "%s" "$0" > "$program_path/ephemeral_component.py"
+
+          _KFP_RUNTIME=true python3 -m kfp.dsl.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+
+          '
+        - "\nimport kfp\nfrom kfp import dsl\nfrom kfp.dsl import *\nfrom typing import\
+          \ *\n\ndef resolve_hyperparameters(\n    project: str, region: str, bucket:\
+          \ str, dataset: str,\n    training_image: str, hpo_machine_type: str,\n\
+          \    hpo_accelerator_type: str, hpo_accelerator_count: int,\n    enable_hpo:\
+          \ bool,\n    params_source: str,\n    default_lr: float, default_embedding_hid:\
+          \ int, default_train_iters: int,\n    hpo_max_trials: int, hpo_parallel:\
+          \ int, hpo_val_episodes: int,\n    seed: int, n_way: int, k_shot: int, query:\
+          \ int,\n    report: Output[HTML],\n) -> NamedTuple(\"HP\", [(\"lr\", float),\
+          \ (\"embedding_hid\", int), (\"train_iters\", int), (\"source\", str)]):\n\
+          \    import json\n    import time\n    from collections import namedtuple\n\
+          \n    HP = namedtuple(\"HP\", [\"lr\", \"embedding_hid\", \"train_iters\"\
+          , \"source\"])\n\n    def write_report(html: str) -> None:\n        with\
+          \ open(report.path, \"w\") as f:\n            f.write(\"<!DOCTYPE html><html><head><style>\"\
+          \n                    \"body{font-family:-apple-system,sans-serif;margin:24px;color:#1a1a1a;max-width:820px}\"\
+          \n                    \"table{border-collapse:collapse;margin:14px 0}\"\n\
+          \                    \"td,th{border:1px solid #ddd;padding:5px 10px;font-size:13px;text-align:left}\"\
+          \n                    \".win{background:#e8f5ec;font-weight:600}\"\n   \
+          \                 \".meta{font-size:12px;color:#888}.src{font-size:15px;font-weight:600;color:#4C72B0}\"\
+          \n                    \"</style></head><body>\" + html + \"</body></html>\"\
+          )\n\n    # ---------- passthrough ----------\n    if not enable_hpo:\n \
+          \       source, lr, hid, iters = \"config\", default_lr, default_embedding_hid,\
+          \ default_train_iters\n        gcs_note = \"\"\n        if params_source\
+          \ == \"auto\":\n            try:\n                from google.cloud import\
+          \ storage\n                blob = storage.Client(project=project).bucket(bucket).blob(\"\
+          hpo/best/latest.json\")\n                saved = json.loads(blob.download_as_bytes().decode(\"\
+          utf-8\"))\n                lr, hid, iters = float(saved[\"lr\"]), int(saved[\"\
+          embedding_hid\"]), int(saved[\"train_iters\"])\n                source =\
+          \ f\"gcs:{saved.get('saved_at', '?')}\"\n                gcs_note = (f\"\
+          val_accuracy at tuning time: {saved.get('val_accuracy', float('nan')):.4f};\
+          \ \"\n                            f\"tuning job: {saved.get('hpo_job', '?')}\"\
+          )\n                print(f\"Params from GCS latest.json ({source}): lr={lr},\
+          \ hid={hid}, iters={iters}\")\n            except Exception as e:  # brak\
+          \ pliku = jeszcze nigdy nie stroylismy\n                print(f\"No saved\
+          \ best params in GCS ({type(e).__name__}) - falling back to config.\")\n\
+          \        else:\n            print(\"params_source='config' - using config\
+          \ values explicitly.\")\n        write_report(\n            f\"<h2>Hyperparameters\
+          \ - passthrough (HPO disabled)</h2>\"\n            f\"<p class='src'>source:\
+          \ {source}</p>\"\n            f\"<table><tr><th>param</th><th>value</th></tr>\"\
+          \n            f\"<tr><td>lr</td><td>{lr}</td></tr>\"\n            f\"<tr><td>embedding_hid</td><td>{hid}</td></tr>\"\
+          \n            f\"<tr><td>train_iters</td><td>{iters}</td></tr></table>\"\
+          \n            f\"<p class='meta'>{gcs_note}</p>\"\n            f\"<p class='meta'>params_source='{params_source}':\
+          \ 'auto' reads hpo/best/latest.json \"\n            f\"from GCS when it\
+          \ exists (falls back to config); 'config' forces config values.</p>\")\n\
+          \        return HP(lr, hid, iters, source)\n\n    # ---------- tuning ----------\n\
+          \    from google.cloud import aiplatform\n    from google.cloud import storage\n\
+          \    from google.cloud.aiplatform import hyperparameter_tuning as hpt\n\
+          \    aiplatform.init(project=project, location=region, staging_bucket=f\"\
+          gs://{bucket}\")\n    # GPU dla TRIALI (nie dla tego komponentu - on tylko\
+          \ czeka na wynik)\n    machine_spec = {\"machine_type\": hpo_machine_type}\n\
+          \    if hpo_accelerator_type:\n        machine_spec[\"accelerator_type\"\
+          ] = hpo_accelerator_type\n        machine_spec[\"accelerator_count\"] =\
+          \ hpo_accelerator_count\n    print(f\"TRIAL MACHINE SPEC: {machine_spec}\"\
+          )\n    if \"accelerator_type\" in machine_spec:\n        print(\"UWAGA:\
+          \ triale zadaja GPU - wymaga quoty 'Custom model training \"\n         \
+          \     \"NVIDIA T4 GPUs' w Vertex Training (INNEJ niz quota Workbencha).\
+          \ \"\n              \"Wiszace triale w Queued = brak quoty.\")\n    worker_pool_specs\
+          \ = [{\n        \"machine_spec\": machine_spec,\n        \"replica_count\"\
+          : 1,\n        \"container_spec\": {\n            \"image_uri\": training_image,\n\
+          \            \"command\": [\"python\", \"scripts/hpo_train_entry.py\"],\n\
+          \            \"args\": [\"--project\", project, \"--bucket\", bucket, \"\
+          --dataset\", dataset,\n                     \"--seed\", str(seed), \"--n-way\"\
+          , str(n_way), \"--k-shot\", str(k_shot),\n                     \"--query\"\
+          , str(query), \"--val-episodes\", str(hpo_val_episodes)],\n        },\n\
+          \    }]\n    custom_job = aiplatform.CustomJob(display_name=\"fsl-hpo-trial\"\
+          ,\n                                      worker_pool_specs=worker_pool_specs)\n\
+          \    hpo_job = aiplatform.HyperparameterTuningJob(\n        display_name=\"\
+          fsl-protonet-hpo\",\n        custom_job=custom_job,\n        metric_spec={\"\
+          val_accuracy\": \"maximize\"},\n        parameter_spec={\n            \"\
+          lr\": hpt.DoubleParameterSpec(min=1e-4, max=1e-2, scale=\"log\"),\n    \
+          \        \"embedding_hid\": hpt.DiscreteParameterSpec(values=[32, 64, 128],\
+          \ scale=\"linear\"),\n            \"train_iters\": hpt.IntegerParameterSpec(min=200,\
+          \ max=1200, scale=\"linear\"),\n        },\n        max_trial_count=hpo_max_trials,\n\
+          \        parallel_trial_count=hpo_parallel,\n        max_failed_trial_count=5,\
+          \   # pojedyncze porazki nie ubijaja strojenia\n    )\n    # BEZ timeout:\
+          \ empirycznie (3 przebiegi) scheduling.timeout obejmowal czas\n    # w kolejce\
+          \ i ubijal joby czekajace na zasoby jako CANCELED. Hamulec\n    # kosztu\
+          \ = max_trial_count; wiszace triale rozwiazuje sie quota, nie zegarem.\n\
+          \    hpo_job.run()\n\n    rows = []\n    best_val, best = -1.0, None\n \
+          \   for t in hpo_job.trials:\n        if t.final_measurement and t.final_measurement.metrics:\n\
+          \            v = t.final_measurement.metrics[0].value\n            params\
+          \ = {p.parameter_id: p.value for p in t.parameters}\n            rows.append((v,\
+          \ t.id, params))\n            if v > best_val:\n                best_val,\
+          \ best = v, params\n    assert best is not None, \"HPO finished without\
+          \ any successful trial\"\n    rows.sort(reverse=True)\n    print(f\"HPO\
+          \ best: val_accuracy={best_val:.4f}, params={best}\")\n\n    # --- zapis\
+          \ zwyciezcy do GCS: latest + kopia z timestampem (append-only historia)\
+          \ ---\n    saved_at = time.strftime(\"%Y%m%d-%H%M%S\")\n    record = {\"\
+          lr\": float(best[\"lr\"]), \"embedding_hid\": int(best[\"embedding_hid\"\
+          ]),\n              \"train_iters\": int(best[\"train_iters\"]), \"val_accuracy\"\
+          : float(best_val),\n              \"saved_at\": saved_at, \"hpo_job\": hpo_job.resource_name,\n\
+          \              \"dataset\": dataset, \"seed\": seed}\n    gcs_bucket = storage.Client(project=project).bucket(bucket)\n\
+          \    payload = json.dumps(record, indent=2)\n    gcs_bucket.blob(f\"hpo/best/{saved_at}.json\"\
+          ).upload_from_string(payload)\n    gcs_bucket.blob(\"hpo/best/latest.json\"\
+          ).upload_from_string(payload)\n    print(f\"Best params saved to gs://{bucket}/hpo/best/latest.json\
+          \ (+ {saved_at}.json)\")\n\n    # --- raport HTML: ranking triali, zwyciezca\
+          \ wyrozniony ---\n    lo = min(v for v, _, _ in rows)\n    span = (best_val\
+          \ - lo) or 1e-9\n    table = \"<tr><th>#</th><th>trial</th><th>val_accuracy</th><th>lr</th><th>hid</th><th>iters</th><th></th></tr>\"\
+          \n    for rank, (v, tid, p) in enumerate(rows, 1):\n        w = int(20 +\
+          \ 200 * (v - lo) / span)\n        bar = (f'<svg width=\"230\" height=\"\
+          14\"><rect width=\"{w}\" height=\"14\" rx=\"3\" '\n               f'fill=\"\
+          {\"#2a7d4f\" if rank == 1 else \"#b8c4d8\"}\"/></svg>')\n        cls = '\
+          \ class=\"win\"' if rank == 1 else \"\"\n        table += (f'<tr{cls}><td>{rank}</td><td>{tid}</td><td>{v:.4f}</td>'\n\
+          \                  f'<td>{float(p[\"lr\"]):.5f}</td><td>{int(p[\"embedding_hid\"\
+          ])}</td>'\n                  f'<td>{int(p[\"train_iters\"])}</td><td>{bar}</td></tr>')\n\
+          \    write_report(\n        f\"<h2>HPO result - {len(rows)} completed trials</h2>\"\
+          \n        f\"<p class='src'>winner: val_accuracy={best_val:.4f} | lr={float(best['lr']):.5f},\
+          \ \"\n        f\"hid={int(best['embedding_hid'])}, iters={int(best['train_iters'])}</p>\"\
+          \n        f\"<table>{table}</table>\"\n        f\"<p class='meta'>Saved\
+          \ to gs://{bucket}/hpo/best/latest.json (+ timestamped copy). \"\n     \
+          \   f\"Future passthrough runs (hpo.enabled=false, params_source='auto')\
+          \ will use it \"\n        f\"automatically. Tuned on VALIDATION; the gates\
+          \ downstream judge on TEST.</p>\"\n        f\"<p class='meta'>job: {hpo_job.resource_name}</p>\"\
+          )\n    return HP(float(best[\"lr\"]), int(best[\"embedding_hid\"]), int(best[\"\
+          train_iters\"]), \"hpo\")\n\n"
+        image: python:3.10
     exec-train-container:
       container:
         args:
@@ -1401,6 +1619,7 @@ root:
           name: comp-log-experiment-component
         dependentTasks:
         - evaluate-gate-component
+        - resolve-hyperparameters
         - train-container
         inputs:
           parameters:
@@ -1432,8 +1651,16 @@ root:
               taskOutputParameter:
                 outputParameterKey: reason
                 producerTask: evaluate-gate-component
+            hp_source:
+              taskOutputParameter:
+                outputParameterKey: source
+                producerTask: resolve-hyperparameters
             k_shot:
               componentInputParameter: k_shot
+            lr:
+              taskOutputParameter:
+                outputParameterKey: lr
+                producerTask: resolve-hyperparameters
             n_way:
               componentInputParameter: n_way
             project:
@@ -1447,18 +1674,20 @@ root:
             seed:
               componentInputParameter: seed
             train_iters:
-              componentInputParameter: train_iters
+              taskOutputParameter:
+                outputParameterKey: train_iters
+                producerTask: resolve-hyperparameters
             train_time:
               taskOutputParameter:
                 outputParameterKey: train_time
                 producerTask: train-container
         taskInfo:
           name: log-experiment-component
-      train-container:
+      resolve-hyperparameters:
         cachingOptions:
           enableCache: true
         componentRef:
-          name: comp-train-container
+          name: comp-resolve-hyperparameters
         dependentTasks:
         - verify-frozen-component
         inputs:
@@ -1467,12 +1696,69 @@ root:
               componentInputParameter: bucket
             dataset:
               componentInputParameter: dataset
-            embedding_hid:
+            default_embedding_hid:
               componentInputParameter: embedding_hid
+            default_lr:
+              componentInputParameter: lr
+            default_train_iters:
+              componentInputParameter: train_iters
+            enable_hpo:
+              componentInputParameter: enable_hpo
+            hpo_accelerator_count:
+              componentInputParameter: hpo_accelerator_count
+            hpo_accelerator_type:
+              componentInputParameter: hpo_accelerator_type
+            hpo_machine_type:
+              componentInputParameter: hpo_machine_type
+            hpo_max_trials:
+              componentInputParameter: hpo_max_trials
+            hpo_parallel:
+              componentInputParameter: hpo_parallel
+            hpo_val_episodes:
+              componentInputParameter: hpo_val_episodes
+            k_shot:
+              componentInputParameter: k_shot
+            n_way:
+              componentInputParameter: n_way
+            params_source:
+              componentInputParameter: hpo_params_source
+            project:
+              componentInputParameter: project
+            query:
+              componentInputParameter: query
+            region:
+              componentInputParameter: region
+            seed:
+              componentInputParameter: seed
+            training_image:
+              componentInputParameter: training_image
+        taskInfo:
+          name: resolve-hyperparameters
+      train-container:
+        cachingOptions:
+          enableCache: true
+        componentRef:
+          name: comp-train-container
+        dependentTasks:
+        - resolve-hyperparameters
+        inputs:
+          parameters:
+            bucket:
+              componentInputParameter: bucket
+            dataset:
+              componentInputParameter: dataset
+            embedding_hid:
+              taskOutputParameter:
+                outputParameterKey: embedding_hid
+                producerTask: resolve-hyperparameters
             k_shot:
               componentInputParameter: k_shot
             location:
               componentInputParameter: region
+            lr:
+              taskOutputParameter:
+                outputParameterKey: lr
+                producerTask: resolve-hyperparameters
             n_way:
               componentInputParameter: n_way
             project:
@@ -1482,7 +1768,9 @@ root:
             seed:
               componentInputParameter: seed
             train_iters:
-              componentInputParameter: train_iters
+              taskOutputParameter:
+                outputParameterKey: train_iters
+                producerTask: resolve-hyperparameters
         taskInfo:
           name: train-container
       verify-frozen-component:
@@ -1516,12 +1804,44 @@ root:
         defaultValue: 64.0
         isOptional: true
         parameterType: NUMBER_INTEGER
+      enable_hpo:
+        defaultValue: false
+        isOptional: true
+        parameterType: BOOLEAN
       experiment_name:
         defaultValue: fsl-inner-loop
         isOptional: true
         parameterType: STRING
       explain_episodes:
         defaultValue: 60.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      hpo_accelerator_count:
+        defaultValue: 0.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      hpo_accelerator_type:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
+      hpo_machine_type:
+        defaultValue: n1-standard-8
+        isOptional: true
+        parameterType: STRING
+      hpo_max_trials:
+        defaultValue: 12.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      hpo_parallel:
+        defaultValue: 3.0
+        isOptional: true
+        parameterType: NUMBER_INTEGER
+      hpo_params_source:
+        defaultValue: auto
+        isOptional: true
+        parameterType: STRING
+      hpo_val_episodes:
+        defaultValue: 400.0
         isOptional: true
         parameterType: NUMBER_INTEGER
       image_name:
@@ -1536,6 +1856,10 @@ root:
         defaultValue: 5.0
         isOptional: true
         parameterType: NUMBER_INTEGER
+      lr:
+        defaultValue: 0.001
+        isOptional: true
+        parameterType: NUMBER_DOUBLE
       max_std_threshold:
         defaultValue: 0.05
         isOptional: true
@@ -1578,5 +1902,9 @@ root:
         defaultValue: 300.0
         isOptional: true
         parameterType: NUMBER_INTEGER
+      training_image:
+        defaultValue: ''
+        isOptional: true
+        parameterType: STRING
 schemaVersion: 2.1.0
 sdkVersion: kfp-2.16.1

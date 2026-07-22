@@ -99,18 +99,21 @@ def main() -> None:
     from google.cloud import storage
 
     from fsl.config import TrainConfig
+    from fsl.errors import explain_failure, require
     from fsl.data.omniglot import build_task_samplers, load_frozen_omniglot
     from fsl.models.protonet import Conv4
     from fsl.training.loop import evaluate
 
     # --- 1. download the saved artifact (the thing we're actually judging) ---
-    assert args.model_dir.startswith("gs://")
+    require(args.model_dir.startswith("gs://"),
+            f"model_dir must be a gs:// path, got {args.model_dir!r}")
     bucket_name, _, prefix = args.model_dir[len("gs://"):].partition("/")
     client = storage.Client(project=args.project)
     gcs_bucket = client.bucket(bucket_name)
     local = Path(tempfile.mkdtemp())
-    for name in ("model.pt", "architecture.json"):
-        gcs_bucket.blob(f"{prefix}/{name}").download_to_filename(str(local / name))
+    with explain_failure("downloading model artifact from GCS", bucket=bucket_name):
+        for name in ("model.pt", "architecture.json"):
+            gcs_bucket.blob(f"{prefix}/{name}").download_to_filename(str(local / name))
     arch = json.loads((local / "architecture.json").read_text())
     print(f"Loaded artifact from {args.model_dir}: {arch}")
 

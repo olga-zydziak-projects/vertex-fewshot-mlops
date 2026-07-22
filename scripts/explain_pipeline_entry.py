@@ -202,14 +202,16 @@ def main() -> None:
     from fsl.config import TrainConfig
     from fsl.data.omniglot import build_task_samplers, load_frozen_omniglot
     from fsl.models.protonet import Conv4
+    from fsl.errors import explain_failure
 
     # load the saved artifact
     bucket_name, _, prefix = args.model_dir[len("gs://"):].partition("/")
     client = storage.Client(project=args.project)
     gcs_bucket = client.bucket(bucket_name)
     local = Path(tempfile.mkdtemp())
-    for name in ("model.pt", "architecture.json"):
-        gcs_bucket.blob(f"{prefix}/{name}").download_to_filename(str(local / name))
+    with explain_failure("downloading model artifact from GCS", bucket=bucket_name):
+        for name in ("model.pt", "architecture.json"):
+            gcs_bucket.blob(f"{prefix}/{name}").download_to_filename(str(local / name))
     arch = json.loads((local / "architecture.json").read_text())
     model = Conv4(in_c=arch["in_channels"], hid=arch["embedding_hid"])
     model.load_state_dict(torch.load(local / "model.pt", map_location="cpu"))

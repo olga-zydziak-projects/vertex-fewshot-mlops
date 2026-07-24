@@ -50,14 +50,18 @@ def main() -> None:
     import hypertune
 
     from fsl.config import TrainConfig
+    from fsl.data.manifest import fetch_manifest, get_geometry
     from fsl.data.omniglot import build_task_samplers, load_frozen_omniglot
     from fsl.training.loop import evaluate, train
 
     bucket = args.bucket or f"{args.project}-fsl-data"
+    manifest = fetch_manifest(args.project, bucket, args.dataset)
+    in_channels, image_size = get_geometry(manifest, args.dataset)
     cfg = TrainConfig(
         project=args.project, region=args.region, bucket=bucket, dataset=args.dataset,
         n_way=args.n_way, k_shot=args.k_shot, query=args.query, seed=args.seed,
         lr=args.lr, embedding_hid=args.embedding_hid, train_iters=args.train_iters,
+        in_channels=in_channels, image_size=image_size,
         log_to_vertex=False,   # Vizier tracks trials; Experiments logging stays off here
     )
 

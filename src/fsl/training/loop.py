@@ -14,7 +14,7 @@ import numpy as np
 import torch
 
 from fsl.config import TrainConfig
-from fsl.data.omniglot import build_task_samplers, load_frozen_omniglot
+from fsl.data.registry import get_loaders
 from fsl.models.protonet import Conv4, fast_adapt
 
 
@@ -45,10 +45,11 @@ def train(cfg: TrainConfig) -> dict:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("Device:", device)
 
-    dataset, archive_sha = load_frozen_omniglot(cfg)
+    load_frozen, build_task_samplers = get_loaders(cfg)
+    dataset, archive_sha = load_frozen(cfg)
     train_tasks, val_tasks, test_tasks = build_task_samplers(dataset, cfg)
 
-    model = Conv4(in_c=1, hid=cfg.embedding_hid).to(device)
+    model = Conv4(in_c=cfg.in_channels, hid=cfg.embedding_hid).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr)
 
     if cfg.log_to_vertex:

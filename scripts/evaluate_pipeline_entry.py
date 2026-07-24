@@ -100,7 +100,7 @@ def main() -> None:
 
     from fsl.config import TrainConfig
     from fsl.errors import explain_failure, require
-    from fsl.data.omniglot import build_task_samplers, load_frozen_omniglot
+    from fsl.data.registry import get_loaders
     from fsl.models.protonet import Conv4
     from fsl.training.loop import evaluate
 
@@ -130,9 +130,13 @@ def main() -> None:
         dataset=args.dataset, seed=arch["seed"],
         n_way=arch["n_way"], k_shot=arch["k_shot"],
         embedding_hid=arch["embedding_hid"],
+        in_channels=arch["in_channels"],
+        image_size=arch.get("image_size", 28),  # pre-RESISC45 artifacts lack it
+
         test_episodes=args.test_episodes, log_to_vertex=False,
     )
-    dataset, archive_sha = load_frozen_omniglot(cfg)
+    load_frozen, build_task_samplers = get_loaders(cfg)
+    dataset, archive_sha = load_frozen(cfg)
     _, _, test_tasks = build_task_samplers(dataset, cfg)
 
     # --- 4. recompute independently ---

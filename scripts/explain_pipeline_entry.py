@@ -42,8 +42,19 @@ def _write(path: str, value) -> None:
 def tensor_to_png_b64(t, scale=3):
     import numpy as np
     from PIL import Image
-    arr = (t.squeeze().cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
-    img = Image.fromarray(arr, mode="L").resize((28 * scale, 28 * scale), Image.NEAREST)
+    a = t.cpu().numpy()
+    if a.ndim == 3 and a.shape[0] == 3:
+        # RGB normalised with ImageNet stats in the loader - undo for display
+        mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)
+        std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
+        a = (a * std + mean).clip(0, 1)
+        arr = (a.transpose(1, 2, 0) * 255).astype(np.uint8)
+        img = Image.fromarray(arr, mode="RGB")
+    else:
+        arr = (a.squeeze() * 255).clip(0, 255).astype(np.uint8)
+        img = Image.fromarray(arr, mode="L")
+    side = arr.shape[0]
+    img = img.resize((side * scale, side * scale), Image.NEAREST)
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode()
@@ -200,7 +211,7 @@ def main() -> None:
     from google.cloud import storage
 
     from fsl.config import TrainConfig
-    from fsl.data.omniglot import build_task_samplers, load_frozen_omniglot
+    from fsl.data.registry import get_loaders
     from fsl.models.protonet import Conv4
     from fsl.errors import explain_failure
 
@@ -222,8 +233,11 @@ def main() -> None:
     cfg = TrainConfig(project=args.project, region=args.region, bucket=args.bucket,
                       dataset=args.dataset, seed=arch["seed"], n_way=n_way,
                       k_shot=k_shot, embedding_hid=arch["embedding_hid"],
+                      in_channels=arch["in_channels"],
+                      image_size=arch.get("image_size", 28),
                       log_to_vertex=False)
-    dataset, _ = load_frozen_omniglot(cfg)
+    load_frozen, build_task_samplers = get_loaders(cfg)
+    dataset, _ = load_frozen(cfg)
     _, _, test_tasks = build_task_samplers(dataset, cfg)
 
     # scan episodes; collect margins + candidates for the case studies

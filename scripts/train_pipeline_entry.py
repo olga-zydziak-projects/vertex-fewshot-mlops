@@ -9,16 +9,16 @@ difference is how results leave:
     and write metric values to the KFP output paths so the gate/register
     components downstream can consume them.
 
-`train()` already returns everything (metrics + the model object). The only
-thing this wrapper adds is persistence: the returned model lives in memory, and
-the pipeline needs it in GCS - so we save state_dict + architecture.json there,
-exactly like the lightweight component did, and hand back the GCS dir.
+Order matters here: the frozen MANIFEST is fetched FIRST, because it is the
+single source of truth for the data's input geometry (channels, train size) -
+TrainConfig needs those before the model is built. The same fetch also yields
+the archive sha for provenance, so nothing is read twice.
 
 Usage (KFP fills the --*-output-path args via OutputPath):
     python scripts/train_pipeline_entry.py \
-        --project P --bucket B --dataset omniglot \
-        --n-way 5 --k-shot 5 --query 15 --seed 0 --train-iters 300 \
-        --embedding-hid 64 \
+        --project P --bucket B --dataset resisc45 \
+        --n-way 5 --k-shot 5 --query 15 --seed 0 --train-iters 1400 \
+        --embedding-hid 64 --lr 0.001 \
         --accuracy-mean-output-path /path --accuracy-ci95-output-path /path \
         --accuracy-std-output-path /path --train-time-output-path /path \
         --model-dir-output-path /path --data-sha-output-path /path
@@ -67,26 +67,13 @@ def main() -> None:
     from google.cloud import storage
 
     from fsl.config import TrainConfig
+    from fsl.data.manifest import get_geometry
     from fsl.errors import explain_failure
-    from fsl.data.omniglot import load_frozen_omniglot
     from fsl.training.loop import train
 
     bucket = args.bucket or f"{args.project}-fsl-data"
 
-    cfg = TrainConfig(
-        project=args.project, region=args.region, bucket=bucket, dataset=args.dataset,
-        n_way=args.n_way, k_shot=args.k_shot, query=args.query, seed=args.seed,
-        train_iters=args.train_iters, embedding_hid=args.embedding_hid, lr=args.lr,
-        log_to_vertex=False,   # pipeline logs via a separate component, not here
-    )
-
-    # train() returns metrics + the model object (see fsl/training/loop.py)
-    result = train(cfg)
-
-    # --- persist the model to GCS (the piece loop.py doesn't do) ---
-    # We need the archive sha for provenance; load_frozen_omniglot returns it,
-    # and train() already loaded the data, but doesn't pass the sha back in the
-    # dict - so we re-read just the manifest (cheap) to get it.
+    # --- manifest FIRST: geometry (for the model) + sha (for provenance) ---
     client = storage.Client(project=args.project)
     gcs = client.bucket(bucket)
     with explain_failure("reading dataset manifest from GCS", bucket=bucket):
@@ -94,7 +81,23 @@ def main() -> None:
             gcs.blob(f"raw/{args.dataset}/MANIFEST.json").download_as_bytes().decode("utf-8")
         )
     archive_sha = manifest["archive_sha256"]
+    # geometry flows from the frozen manifest - the single source of truth
+    # about the data's shape (config/CLI no longer carry it for the pipeline)
+    in_channels, image_size = get_geometry(manifest, args.dataset)
+    print(f"geometry from manifest: {in_channels}x{image_size}x{image_size}")
 
+    cfg = TrainConfig(
+        project=args.project, region=args.region, bucket=bucket, dataset=args.dataset,
+        n_way=args.n_way, k_shot=args.k_shot, query=args.query, seed=args.seed,
+        train_iters=args.train_iters, embedding_hid=args.embedding_hid, lr=args.lr,
+        in_channels=in_channels, image_size=image_size,
+        log_to_vertex=False,   # pipeline logs via a separate component, not here
+    )
+
+    # train() returns metrics + the model object (see fsl/training/loop.py)
+    result = train(cfg)
+
+    # --- persist the model to GCS (the piece loop.py doesn't do) ---
     import tempfile
     local_model = Path(tempfile.mkdtemp()) / "model"
     local_model.mkdir(parents=True, exist_ok=True)
@@ -102,7 +105,8 @@ def main() -> None:
     (local_model / "architecture.json").write_text(json.dumps({
         "architecture": "Conv4",
         "embedding_hid": cfg.embedding_hid,
-        "in_channels": 1,
+        "in_channels": cfg.in_channels,
+        "image_size": cfg.image_size,
         "n_way": cfg.n_way,
         "k_shot": cfg.k_shot,
         "seed": cfg.seed,       # so evaluation can reconstruct the same class split
